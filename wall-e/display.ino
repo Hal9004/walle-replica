@@ -1,108 +1,187 @@
-/**
- * oLED Display
- *
- * @file      display.ino
- * @brief     Draw battery level on the oLED display
- * @author    Hans Vandamme
- * @copyright MIT license
- * @version   1.0
- *
- * Code to draw the battery level indicator onto an oLED
- * display. For instructions of how to wire up the display,
- * see the README file included in this repository.
- */
+int offset = 55;
+int width = 205;
+int y = 45;
+int t = 8;
+int g = 8;
 
-#ifdef OLED
+// ------------------------------------------------
+// Init screen + boot animation
+// ------------------------------------------------
 
-/**
- * Draw battery level on the display
- * 
- * @param  batlevel The current battery percentage
- */
-void displayLevel(int batlevel) {
+void bootScreen(){
+  tft.fillScreen(ST77XX_BLACK);
+  // text
+  tft.setCursor(offset-5, 15);
+  tft.setTextColor(ST77XX_YELLOW);
+  tft.setTextSize(2);
+  tft.setTextWrap(false);
+  tft.print("SOLAR CHARGE LEVEL");
 
-	u8g2.firstPage();
-	do {
-		u8g2.setDrawColor(1);
-		drawSun();
+  delay(1000);
 
-		// Scale to 50% as the battery should not drop bellow that anyway
-		drawBatt10();
-		if (batlevel > 55) drawBatt20();
-		if (batlevel > 60) drawBatt30();
-		if (batlevel > 65) drawBatt40();
-		if (batlevel > 70) drawBatt50();
-		if (batlevel > 75) drawBatt60();
-		if (batlevel > 80) drawBatt70();
-		if (batlevel > 85) drawBatt80();
-		if (batlevel > 90) drawBatt90();
-		if (batlevel > 95) drawBatt100();
-	} while ( u8g2.nextPage() );
- 
+  // SUN
+  tft.fillCircle(offset+30, y+30, 15, ST77XX_YELLOW);
+
+  tft.fillRect(offset+30-2, y, 4, 60, ST77XX_YELLOW);
+  tft.fillRect(offset, y+28, 60, 4, ST77XX_YELLOW);
+
+  tft.drawLine(offset+15, y+5, offset+45, y+55, ST77XX_YELLOW);
+  tft.drawLine(offset+15-1, y+5, offset+45-1, y+55, ST77XX_YELLOW);
+  tft.drawLine(offset+15+1, y+5, offset+45+1, y+55, ST77XX_YELLOW);
+  tft.drawLine(offset+15-1, y+5+1, offset+45-1, y+55+1, ST77XX_YELLOW);
+  tft.drawLine(offset+15+1, y+5-1, offset+45+1, y+55-1, ST77XX_YELLOW);
+
+  tft.drawLine(offset+5, y+15, offset+55, y+45, ST77XX_YELLOW);
+  tft.drawLine(offset+5, y+15-1, offset+55, y+45-1, ST77XX_YELLOW);
+  tft.drawLine(offset+5, y+15+1, offset+55, y+45+1, ST77XX_YELLOW);
+  tft.drawLine(offset+5+1, y+15-1, offset+55+1, y+45-1, ST77XX_YELLOW);
+  tft.drawLine(offset+5-1, y+15+1, offset+55-1, y+45+1, ST77XX_YELLOW);
+
+  tft.drawLine(offset+5, y+45, offset+55, y+15, ST77XX_YELLOW);
+  tft.drawLine(offset+5, y+45-1, offset+55, y+15-1, ST77XX_YELLOW);
+  tft.drawLine(offset+5, y+45+1, offset+55, y+15+1, ST77XX_YELLOW);
+  tft.drawLine(offset+5-1, y+45-1, offset+55-1, y+15-1, ST77XX_YELLOW);
+  tft.drawLine(offset+5+1, y+45+1, offset+55+1, y+15+1, ST77XX_YELLOW);
+
+  tft.drawLine(offset+15, y+55, offset+45, y+5, ST77XX_YELLOW);
+  tft.drawLine(offset+15-1, y+55, offset+45-1, y+5, ST77XX_YELLOW);
+  tft.drawLine(offset+15+1, y+55, offset+45+1, y+5, ST77XX_YELLOW);
+  tft.drawLine(offset+15+1, y+55+1, offset+45+1, y+5+1, ST77XX_YELLOW);
+  tft.drawLine(offset+15-1, y+55-1, offset+45-1, y+5-1, ST77XX_YELLOW);
+
+  tft.fillCircle(offset+30, y+30, 18, ST77XX_BLACK);
+  tft.fillCircle(offset+30, y+30, 15, ST77XX_YELLOW);
+  tft.fillCircle(offset+30, y+30, 11, ST77XX_BLACK);
+  
+  delay(1000);
+
+  // Battery animate
+  tft.fillRect(offset+width*0.45, y+9*(t+g), width*0.55, 25, ST77XX_YELLOW);
+  delay(1000);
+  tft.fillRect(offset+width*0.45, y+8*(t+g), width*0.55, t, ST77XX_YELLOW);
+  delay(800);
+  tft.fillRect(offset+width*0.45, y+7*(t+g), width*0.55, t, ST77XX_YELLOW);
+  delay(100);
+  tft.fillRect(offset+width*0.45, y+6*(t+g), width*0.55, t, ST77XX_YELLOW);
+  delay(100);
+  tft.fillRect(offset+width*0.45, y+5*(t+g), width*0.55, t, ST77XX_YELLOW);
+  delay(100);
+  tft.fillRect(offset+width*0.45, y+4*(t+g), width*0.55, t, ST77XX_YELLOW);
+  delay(100);
+  tft.fillRect(offset+width*0.45, y+3*(t+g), width*0.55, t, ST77XX_YELLOW);
+  delay(100);
+  tft.fillRect(offset+width*0.45, y+2*(t+g), width*0.55, t, ST77XX_YELLOW);
+  delay(100);
+  tft.fillRect(offset+width*0.45, y+1*(t+g), width*0.55, t, ST77XX_YELLOW);
+  delay(100);
+  tft.fillRect(offset+width*0.45, y, width*0.55, t, ST77XX_YELLOW);
+  delay(2000);
 }
 
+// -------------------------------------------------------------------
+/// Battery level detection
+// -------------------------------------------------------------------
 
-/**
- * Functions to draw each of the battery level bars
- */
-void drawBatt10() {
-	u8g2.drawBox(108,0,16,40);
+void displayBatteryLevel(int batt){
+
+  if (booted) {
+    if (batt > 10) {
+      tft.fillRect(offset+width*0.45, y+9*(t+g), width*0.55, 25, ST77XX_YELLOW);
+    } else {
+      tft.fillRect(offset+width*0.45, y+9*(t+g), width*0.55, 25, ST77XX_RED);
+      tft.setCursor(offset+width*0.45+15, y+9*(t+g)+5);
+      tft.setTextColor(ST77XX_BLACK);
+      tft.print("WARNING");
+    }
+    if (batt > 20) {
+      tft.fillRect(offset+width*0.45, y+8*(t+g), width*0.55, t, ST77XX_YELLOW);
+    } else {
+      tft.fillRect(offset+width*0.45, y+8*(t+g), width*0.55, t, ST77XX_BLACK);
+    }
+    if (batt > 30) {
+      tft.fillRect(offset+width*0.45, y+7*(t+g), width*0.55, t, ST77XX_YELLOW);
+    } else {
+      tft.fillRect(offset+width*0.45, y+7*(t+g), width*0.55, t, ST77XX_BLACK);
+    }
+    if (batt > 40) {
+      tft.fillRect(offset+width*0.45, y+6*(t+g), width*0.55, t, ST77XX_YELLOW);
+    } else {
+      tft.fillRect(offset+width*0.45, y+6*(t+g), width*0.55, t, ST77XX_BLACK);
+    }
+    if (batt > 50) {
+      tft.fillRect(offset+width*0.45, y+5*(t+g), width*0.55, t, ST77XX_YELLOW);
+    } else {
+      tft.fillRect(offset+width*0.45, y+5*(t+g), width*0.55, t, ST77XX_BLACK);
+    }
+    if (batt > 60) {
+      tft.fillRect(offset+width*0.45, y+4*(t+g), width*0.55, t, ST77XX_YELLOW);
+    } else {
+      tft.fillRect(offset+width*0.45, y+4*(t+g), width*0.55, t, ST77XX_BLACK);
+    }
+    if (batt > 70) {
+      tft.fillRect(offset+width*0.45, y+3*(t+g), width*0.55, t, ST77XX_YELLOW);
+    } else {
+      tft.fillRect(offset+width*0.45, y+3*(t+g), width*0.55, t, ST77XX_BLACK);
+    }
+    if (batt > 80) {
+      tft.fillRect(offset+width*0.45, y+2*(t+g), width*0.55, t, ST77XX_YELLOW);
+    } else {
+      tft.fillRect(offset+width*0.45, y+2*(t+g), width*0.55, t, ST77XX_BLACK);
+    }
+    if (batt > 90) {
+      tft.fillRect(offset+width*0.45, y+1*(t+g), width*0.55, t, ST77XX_YELLOW);
+    } else {
+      tft.fillRect(offset+width*0.45, y+1*(t+g), width*0.55, t, ST77XX_BLACK);
+    }
+    if (batt > 95) {
+      tft.fillRect(offset+width*0.45, y, width*0.55, t, ST77XX_YELLOW);
+    } else {
+      tft.fillRect(offset+width*0.45, y, width*0.55, t, ST77XX_BLACK);
+    }
+  } else {
+    tft.fillRect(offset, y+60, 100, 20, ST77XX_BLACK); // clear previous
+    tft.setCursor(offset, y+60);
+    tft.setTextColor(ST77XX_WHITE);
+    tft.setTextSize(2);
+    tft.setTextWrap(false);
+    tft.print("Batt: " + String(batt) + "%"); 
+  }
 }
 
-void drawBatt20() {
-	u8g2.drawBox(96,0,7,40);
+int l;
+void showDebugInfo(String debugInfo){
+  if (l >= 5) {
+    l = 0;
+    tft.fillRect(10, 120, 100, 100, ST77XX_BLACK); // clear debug
+  }
+  tft.setCursor(10, 120+l*20);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(2);
+  tft.setTextWrap(false);
+  tft.print(debugInfo);
+  l++;
 }
 
-void drawBatt30() {
-	u8g2.drawBox(84,0,7,40);
+void initDisplay(){
+  tft.init(240, 280);
+  tft.setRotation(1);
+  tft.fillScreen(ST77XX_BLACK);
+  tft.setCursor(offset, y);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(2);
+  tft.setTextWrap(false);
+  tft.print("Connect to WALL-E");
+  tft.setCursor(offset, y+20);
+  tft.print("to reboot him");
 }
 
-void drawBatt40() {
-	u8g2.drawBox(72,0,7,40);
+void showWarning(bool show){
+  if (show){
+    tft.fillRect(offset+width*0.45, y+9*(t+g), width*0.55, 25, ST77XX_RED);
+    tft.setCursor(offset+width*0.45+15, y+9*(t+g)+5);
+    tft.setTextColor(ST77XX_BLACK);
+    tft.print("WARNING");
+  } else {
+    tft.fillRect(offset+width*0.45, y+9*(t+g), width*0.55, 25, ST77XX_BLACK);
+  }
 }
-
-void drawBatt50() {
-	u8g2.drawBox(60,0,7,40);
-}
-
-void drawBatt60() {
-	u8g2.drawBox(48,0,7,40);
-}
-
-void drawBatt70() {
-	u8g2.drawBox(36,0,7,40);
-}
-
-void drawBatt80() {
-	u8g2.drawBox(24,0,7,40);
-}
-
-void drawBatt90() {
-	u8g2.drawBox(12,0,7,40);
-}
-
-void drawBatt100() {
-	u8g2.drawBox(0,0,7,40);
-}
-
-
-/**
- * Draw the sun icon on the display
- */
-void drawSun() {
-	u8g2.drawDisc(20, 55, 3);
-	u8g2.drawLine(20,50,20,46);
-	u8g2.drawLine(20,60,20,64);
-	u8g2.drawLine(15,55,11,55);
-	u8g2.drawLine(25,55,29,55);
-	u8g2.drawLine(22,54,25,47);
-	u8g2.drawLine(25,53,29,50);   
-	u8g2.drawLine(16,53,12,50);
-	u8g2.drawLine(18,51,16,47);
-	u8g2.drawLine(16,58,12,60);
-	u8g2.drawLine(18,60,16,63);
-	u8g2.drawLine(25,58,29,60);
-	u8g2.drawLine(22,60,25,63);
-}
-
-#endif /* OLED */

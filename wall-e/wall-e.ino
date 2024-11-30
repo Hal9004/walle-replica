@@ -22,21 +22,9 @@
  */
 
 #include <Wire.h>
-#include <Adafruit_PWMServoDriver.h>
 #include "Queue.hpp"
-#include "MotorController.hpp"
-
-
-/// Define pin-mapping
-// -- -- -- -- -- -- -- -- -- -- -- -- -- --
-#define DIRECTION_L_PIN 12           // Motor direction pins
-#define DIRECTION_R_PIN 13
-#define PWM_SPEED_L_PIN  3           // Motor PWM pins
-#define PWM_SPEED_R_PIN 11
-#define BRAKE_L_PIN  9               // Motor brake pins
-#define BRAKE_R_PIN  8
-#define SERVO_ENABLE_PIN 10          // Servo shield output enable pin
-
+#include <Adafruit_MotorShield.h>
+#include "../Adafruit_Motor_Shield_V2_Library/utility/Adafruit_MS_PWMServoDriver.h"
 
 /**
  * Battery level detection
@@ -48,37 +36,20 @@
  * @note The scaling factor is calculated according to ratio of the two resistors:
  *       DIVIDER_SCALING_FACTOR = R2 / (R1 + R2)
  *       For example: 47000 / (100000 + 47000) = 0.3197
- *
- * To enable battery level detection, uncomment the next line:
  */
-//#define BAT_L
-#ifdef BAT_L
-	#define BATTERY_LEVEL_PIN A2
-	#define BATTERY_MAX_VOLTAGE 12.6
-	#define BATTERY_MIN_VOLTAGE 10.2
-	#define DIVIDER_SCALING_FACTOR 0.3197
 
+#define BATTERY_LEVEL_PIN A2
+#define BATTERY_MAX_VOLTAGE 12.6
+#define BATTERY_MIN_VOLTAGE 10.2
+#define DIVIDER_SCALING_FACTOR 0.2481
 
-	/**
-	 * OLED Battery Level Display
-	 *
-	 * Displays the battery level on an oLed display. Supports a 1.3 inch oLed display using I2C.
-	 * The constructor is set to a SH1106 1.3 inch display. Change the constructor if you want to use a different display.
-	 * 
-	 * @note Requires Battery level detection to be enabled above
-	 * @note You may get a "Low memory available" warning when compiling for Arduino UNO boards (79% memory usage).
-	 *       It did work in my case, so you should be able to ignore this message.
-	 *
-	 * To enable the oLED display, uncomment the next line:
-	 */
-	//#define OLED
-	#ifdef OLED
-	  
-	  #include <U8g2lib.h>
-	  U8G2_SH1106_128X64_NONAME_1_HW_I2C u8g2(U8G2_R0, 10);
+#include <Adafruit_GFX.h>    // Core graphics library
+#include <Adafruit_ST7789.h> // Hardware-specific library for ST7789
 
-	#endif /* OLED */
-#endif /* BAT_L */
+#define TFT_CS 10 // 
+#define TFT_RST -1 // Or set to -1 and connect to Arduino RESET pin
+#define TFT_DC 11
+Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 
 
 /// Define other constants
@@ -90,16 +61,17 @@
 #define CONTROLLER_THRESHOLD 1    // The minimum error which the dynamics controller tries to achieve
 #define MAX_SERIAL_LENGTH 5       // Maximum number of characters that can be received
 
-
-
 /// Instantiate Objects
 // -- -- -- -- -- -- -- -- -- -- -- -- -- --
-// Servo shield controller class - assumes default address 0x40
-Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
+Adafruit_MS_PWMServoDriver pwm = Adafruit_MS_PWMServoDriver();
+#define SERVO_FREQ 50 // Analog servos run at ~50 Hz updates
 
-// Set up motor controller classes
-MotorController motorL(DIRECTION_L_PIN, PWM_SPEED_L_PIN, BRAKE_L_PIN, false);
-MotorController motorR(DIRECTION_R_PIN, PWM_SPEED_R_PIN, BRAKE_R_PIN, false);
+// Set up motor controller objects
+Adafruit_MotorShield AFMS = Adafruit_MotorShield();
+Adafruit_DCMotor *motorL = AFMS.getMotor(1);
+Adafruit_DCMotor *motorR = AFMS.getMotor(2);
+bool reverseL;
+bool reverseR;
 
 // Queue for animations - buffer is defined outside of the queue class
 // so that the compiler knows how much dynamic memory will be used
@@ -130,6 +102,9 @@ unsigned long motorTimer = 0;
 unsigned long statusTimer = 0;
 unsigned long updateTimer = 0;
 bool autoMode = false;
+bool booted = false;
+bool warning = false;
+#define DEBUG false
 
 
 // Serial Parsing
@@ -141,13 +116,13 @@ uint8_t serialLength = 0;
 
 // ****** SERVO MOTOR CALIBRATION *********************
 // Servo Positions:  Low,High
-int preset[][2] =  {{410,120},  // head rotation
-                    {532,178},  // neck top
-                    {120,310},  // neck bottom
-                    {465,271},  // eye right
-                    {278,479},  // eye left
-                    {340,135},  // arm left
-                    {150,360}}; // arm right
+int preset[][2] =  {{138,542},  // head rotation
+                    {115,518},  // neck top
+                    {98,448},  // neck bottom
+                    {475,230},  // eye right
+                    {270,440},  // eye left
+                    {350,185},  // arm left
+                    {188,360}}; // arm right
 // *****************************************************
 
 
@@ -169,19 +144,6 @@ float accell[] = { 350, 300, 480,1800,1800, 500, 500, 800, 800};  // Servo accel
 
 void setup() {
 
-	// Output Enable (EO) pin for the servo motors
-	pinMode(SERVO_ENABLE_PIN, OUTPUT);
-	digitalWrite(SERVO_ENABLE_PIN, HIGH);
-
-	// Communicate with servo shield (Analog servos run at ~60Hz)
-	pwm.begin();
-	pwm.setPWMFreq(60);
-
-	// Turn off servo outputs
-	for (int i = 0; i < NUMBER_OF_SERVOS; i++) {
-		pwm.setPin(i, 0);
-	}
-
 	// Initialize serial communication for debugging
 	Serial.begin(115200);
 	Serial.println(F("--- Wall-E Control Sketch ---"));
@@ -191,23 +153,30 @@ void setup() {
 	// Check if servo animation queue is working, and move servos to known starting positions
 	if (queue.errors()) Serial.println(F("Error: Unable to allocate memory for servo animation queue"));
 	
+  // Communicate with servo shield (Analog servos run at ~60Hz)
+	pwm.begin();
+	pwm.setPWMFreq(50);
 	// Soft start the servo motors
 	Serial.println(F("Starting up the servo motors"));
-	digitalWrite(SERVO_ENABLE_PIN, LOW);
 	playAnimation(0);
 	softStart(queue.pop(), 3500);
+  // Turn off all servos
+  for (int i = 0; i < NUMBER_OF_SERVOS; i++) {
+        pwm.setPWM(i, 0, 0);
+    }
 
-	// If an oLED is present, start it up
-	#ifdef OLED
-		Serial.println(F("Starting up the display"));
-		u8g2.begin();
-		displayLevel(100);
-	#endif
+  // begin Motor Driver
+  AFMS.begin();
+  setSpeedL(motorL, 0);
+  setSpeedR(motorR, 0);
+
+	// Connect to display
+  Serial.println(F("Starting up the display"));
+  initDisplay();
 
 	Serial.println(F("Startup complete; entering main loop"));
+
 }
-
-
 
 // -------------------------------------------------------------------
 /// Read input from serial port
@@ -262,14 +231,22 @@ void evaluateSerial() {
 
 	Serial.print(firstChar); Serial.println(number);
 
+  if (DEBUG) {
+    String debugInfo = firstChar + String(number);
+    showDebugInfo(debugInfo);
+  }
 
 	// Motor Inputs and Offsets
 	// -- -- -- -- -- -- -- -- -- -- -- -- -- --
-	if      (firstChar == 'X' && number >= -100 && number <= 100) turnValue = int(number * 2.55);       // Left/right control
-	else if (firstChar == 'Y' && number >= -100 && number <= 100) moveValue = int(number * 2.55);       // Forward/reverse control
-	else if (firstChar == 'S' && number >= -100 && number <= 100) turnOffset = number;                  // Steering offset
-	else if (firstChar == 'O' && number >=    0 && number <= 250) motorDeadzone = int(number);          // Motor deadzone offset
-
+	if (firstChar == 'X' && number >= -100 && number <= 100) {
+    turnValue = int(number * 2.55);       // Left/right control
+  } else if (firstChar == 'Y' && number >= -100 && number <= 100) {
+    moveValue = int(number * 2.55);       // Forward/reverse control
+  } else if (firstChar == 'S' && number >= -100 && number <= 100) {
+    turnOffset = number;                  // Steering offset
+  }	else if (firstChar == 'O' && number >=    0 && number <= 250) {
+    motorDeadzone = int(number);          // Motor deadzone offset
+  }
 
 	// Animations
 	// -- -- -- -- -- -- -- -- -- -- -- -- -- --
@@ -394,6 +371,15 @@ void evaluateSerial() {
 		setpos[5] = preset[5][1];
 		setpos[6] = preset[6][0];
 	}
+
+  // Reboot
+  else if (firstChar == 'Z') {		// boot sequence
+    tft.fillScreen(ST77XX_BLACK);
+    booted = true;
+    Serial.println(F("Booted"));
+		bootScreen();
+	}
+
 }
 
 
@@ -497,7 +483,6 @@ void manageServos(float dt) {
 		// If position error is above the threshold
 		if (abs(posError) > CONTROLLER_THRESHOLD && (setpos[i] != -1)) {
 
-			digitalWrite(SERVO_ENABLE_PIN, LOW);
 			moving = true;
 
 			// Determine motion direction
@@ -532,9 +517,8 @@ void manageServos(float dt) {
 	// This helps prevents the motors from overheating
 	if (moving) motorTimer = millis();
 	else if (millis() - motorTimer >= SERVO_OFF_TIME) {
-		//digitalWrite(SERVO_ENABLE_PIN, HIGH);
 		for (int i = 0; i < NUMBER_OF_SERVOS; i++) {
-			pwm.setPin(i, 0);
+			pwm.setPWM(i, 0, 0);
 		}
 	}
 }
@@ -563,7 +547,7 @@ void softStart(animation_t targetPos, int timeMs) {
 			while (millis() < endTime) {
 				pwm.setPWM(i, 0, curpos[i]);
 				delay(10);
-				pwm.setPin(i, 0);
+				pwm.setPWM(i, 0, 0);
 				delay(50);
 			}
 			pwm.setPWM(i, 0, curpos[i]);
@@ -572,7 +556,47 @@ void softStart(animation_t targetPos, int timeMs) {
 	}
 }
 
+// Set motor speed
+void setSpeedL(Adafruit_DCMotor* motor, int pwmValue) {
+    // Bound the PWM value to +-255
+    if (pwmValue > 255) pwmValue = 255;
+    else if (pwmValue < -255) pwmValue = -255;
 
+    // Forward direction
+    if (pwmValue > 0) {
+        motor->run(FORWARD);
+
+    // Reverse direction
+    } else if (pwmValue < 0 ) {
+        motor->run(BACKWARD);
+
+    } else if (pwmValue == 0) {
+      motor->run(RELEASE);
+    }
+    
+    // Set the motor speed (absolute value of pwmValue)
+    motor->setSpeed(abs(pwmValue));
+}
+void setSpeedR(Adafruit_DCMotor* motor, int pwmValue) {
+    // Bound the PWM value to +-255
+    if (pwmValue > 255) pwmValue = 255;
+    else if (pwmValue < -255) pwmValue = -255;
+
+    // Forward direction
+    if (pwmValue > 0) {
+        motor->run(FORWARD);
+
+    // Reverse direction
+    } else if (pwmValue < 0 ) {
+        motor->run(BACKWARD);
+
+    } else if (pwmValue == 0) {
+      motor->run(RELEASE);
+    }
+    
+    // Set the motor speed (absolute value of pwmValue)
+    motor->setSpeed(abs(pwmValue));
+}
 
 // -------------------------------------------------------------------
 /// Manage the movement of the main motors
@@ -586,9 +610,9 @@ void manageMotors(float dt) {
 	setpos[NUMBER_OF_SERVOS] = moveValue - turnValue;
 	setpos[NUMBER_OF_SERVOS + 1] = moveValue + turnValue;
 
-	// Apply turn offset (motor trim) only when motors are active
-	if (setpos[NUMBER_OF_SERVOS] != 0) setpos[NUMBER_OF_SERVOS] -= turnOffset;
-	if (setpos[NUMBER_OF_SERVOS + 1] != 0) setpos[NUMBER_OF_SERVOS + 1] += turnOffset;
+	// // Apply turn offset (motor trim) only when motors are active
+	// if (setpos[NUMBER_OF_SERVOS] != 0) setpos[NUMBER_OF_SERVOS] -= turnOffset;
+	// if (setpos[NUMBER_OF_SERVOS + 1] != 0) setpos[NUMBER_OF_SERVOS + 1] += turnOffset;
 
 	for (int i = NUMBER_OF_SERVOS; i < NUMBER_OF_SERVOS + 2; i++) {
 
@@ -612,8 +636,8 @@ void manageMotors(float dt) {
 		}
 
 		// Apply deadzone offset
-		if (curvel[i] > 0) curvel[i] += motorDeadzone;
-		else if (curvel[i] < 0) curvel[i] -= motorDeadzone; 
+		// if (curvel[i] > 0) curvel[i] += motorDeadzone;
+		// else if (curvel[i] < 0) curvel[i] -= motorDeadzone; 
 
 		// Limit Velocity
 		if (curvel[i] > maxvel[i]) curvel[i] = maxvel[i];
@@ -621,33 +645,28 @@ void manageMotors(float dt) {
 	}
 
 	// Update motor speeds
-	motorL.setSpeed(curvel[NUMBER_OF_SERVOS]);
-	motorR.setSpeed(curvel[NUMBER_OF_SERVOS+1]);
+	setSpeedL(motorL, curvel[NUMBER_OF_SERVOS]);
+	setSpeedR(motorR, curvel[NUMBER_OF_SERVOS+1]);
 }
 
-
-
-// -------------------------------------------------------------------
-/// Battery level detection
-// -------------------------------------------------------------------
-
-#ifdef BAT_L
 void checkBatteryLevel() {
 
 	// Read the analogue pin and calculate battery voltage
-	float voltage = analogRead(BATTERY_LEVEL_PIN) * 5 / 1024.0;
+	float voltage = analogRead(BATTERY_LEVEL_PIN) * 3.3 / 1024.0;
 	voltage = voltage / DIVIDER_SCALING_FACTOR;
 	int percentage = int(100 * (voltage - BATTERY_MIN_VOLTAGE) / float(BATTERY_MAX_VOLTAGE - BATTERY_MIN_VOLTAGE));
 
-  // Update the oLed Display if installed
-  #ifdef OLED
-    displayLevel(percentage);
-  #endif
+  // Update the display
+  displayBatteryLevel(percentage);
+
+  if (DEBUG) {
+    String debugInfo = "BATT_" + String(percentage);
+    showDebugInfo(debugInfo);
+  }
 
 	// Send the percentage via serial
 	Serial.print(F("Battery_")); Serial.println(percentage);
 }
-#endif
 
 
 
@@ -659,37 +678,39 @@ void loop() {
 
 	// Read any new serial messages
 	// -- -- -- -- -- -- -- -- -- -- -- -- -- --
-	if (Serial.available() > 0){
+	if (Serial.available() > 0) {
 		readSerial();
 	}
 
+  if (booted) { // only do stuff if connected and booted correctly
+    // Load or generate new animations
+    // -- -- -- -- -- -- -- -- -- -- -- -- -- --
+    manageAnimations();
 
-	// Load or generate new animations
-	// -- -- -- -- -- -- -- -- -- -- -- -- -- --
-	manageAnimations();
+    // Move Servos and wheels at regular time intervals
+    // -- -- -- -- -- -- -- -- -- -- -- -- -- --
+    if (millis() - updateTimer >= SERVO_UPDATE_TIME) {
+      updateTimer = millis();
 
+      unsigned long newTime = micros();
+      float dt = (newTime - lastTime) / 1000.0;
+      lastTime = newTime;
 
-	// Move Servos and wheels at regular time intervals
-	// -- -- -- -- -- -- -- -- -- -- -- -- -- --
-	if (millis() - updateTimer >= SERVO_UPDATE_TIME) {
-		updateTimer = millis();
+      manageServos(dt);
+      manageMotors(dt);
+    }
 
-		unsigned long newTime = micros();
-		float dt = (newTime - lastTime) / 1000.0;
-		lastTime = newTime;
+  } else { // show warning until booted
+      showWarning(warning);
+      warning = !warning;
+      delay(500);
+    }
 
-		manageServos(dt);
-		manageMotors(dt);
-	}
+  // Update robot status
+  // -- -- -- -- -- -- -- -- -- -- -- -- -- --
+  if (millis() - statusTimer >= STATUS_CHECK_TIME) {
+    statusTimer = millis();
 
-
-	// Update robot status
-	// -- -- -- -- -- -- -- -- -- -- -- -- -- --
-	if (millis() - statusTimer >= STATUS_CHECK_TIME) {
-		statusTimer = millis();
-
-		#ifdef BAT_L
-			checkBatteryLevel();
-		#endif
-	}
+    checkBatteryLevel();
+  }
 }

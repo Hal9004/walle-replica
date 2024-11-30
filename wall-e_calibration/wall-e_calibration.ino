@@ -44,12 +44,8 @@
  */
 
 #include <Wire.h>
-#include <Adafruit_PWMServoDriver.h>
-
-
-// Define the pin-mapping
-// -- -- -- -- -- -- -- -- -- -- -- -- -- --
-#define SR_OE 10           // Servo shield output enable pin
+#include <Adafruit_MotorShield.h>
+#include "../Adafruit_Motor_Shield_V2_Library/utility/Adafruit_MS_PWMServoDriver.h"
 
 
 // Define other constants
@@ -60,7 +56,7 @@
 // Instantiate objects
 // -- -- -- -- -- -- -- -- -- -- -- -- -- --
 // Servo shield controller class
-Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
+Adafruit_MS_PWMServoDriver pwm = Adafruit_MS_PWMServoDriver();
 
 
 // Servo Positions:  Low,High
@@ -70,7 +66,7 @@ int preset[][2] =  {{398, 112},  // head rotation
                     {475, 230},	 // eye right
                     {270, 440},	 // eye left
                     {350, 185},	 // arm left
-                    {188, 360}}; // arm right
+                    {188, 360}}; // arm rightc:\Users\j.chrisp\Projects\WALL-E\walle-replica-modified\wall-e\wall-e.ino
 
 // Rest position
 float restpos[7] = {50, 50, 40, 0, 0, 100, 100};
@@ -96,16 +92,12 @@ int position = preset[0][0] - 1;
 // ------------------------------------------------------------------
 void setup() {
 
-	// Output Enable (EO) pin for the servo motors
-	pinMode(SR_OE, OUTPUT);
-	digitalWrite(SR_OE, HIGH);
-
 	// Communicate with servo shield (Analog servos run at ~60Hz)
 	pwm.begin();
 	pwm.setPWMFreq(60);
 
 	// Turn off servo outputs
-	for (int i = 0; i < SERVOS; i++) pwm.setPin(i, 0);
+	for (int i = 0; i < SERVOS; i++) pwm.setPWM(i, 0, 0);
 
 	// Initialize serial communication for debugging
 	Serial.begin(115200);
@@ -113,7 +105,6 @@ void setup() {
 
 	Serial.println(F("////////// Starting Wall-E Calibration Program //////////"));
 
-	digitalWrite(SR_OE, LOW);
 	softStart();
 	moveToNextPosition();
 }
@@ -137,14 +128,13 @@ void moveToNextPosition() {
 	// Else move servo to middle position and go to the next servo
 	} else {
 		changeServoPosition(int(restpos[currentServo] / 100.0 * (preset[currentServo][1] - preset[currentServo][0]) + preset[currentServo][0]));
-		pwm.setPin(currentServo, 0);
+		pwm.setPWM(currentServo, 0, 0);
 		currentServo++;
 		currentPosition = 0;
 		position = preset[currentServo][currentPosition] - 1;
 
 		// If all servos are calibrated, output the results
 		if (currentServo == SERVOS) {
-			digitalWrite(SR_OE, HIGH);
 			outputResults();
 		}
 
@@ -184,7 +174,7 @@ void softStart() {
 	while (endTime > millis()) {
 		pwm.setPWM(currentServo, 0, position);
 		delay(10);
-		pwm.setPin(currentServo, 0);
+		pwm.setPWM(currentServo, 0, 0);
 		delay(50);
 	}
 	pwm.setPWM(currentServo, 0, position);
